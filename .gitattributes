@@ -1,0 +1,24 @@
+# Normalise line endings to LF in the repository.
+#
+# Prettier is configured with `endOfLine: "lf"` and CI runs `format:check` on
+# Linux. Without this, a Windows checkout would commit CRLF, and the shell
+# scripts in .husky/ and the Docker build would break outright.
+* text=auto eol=lf
+
+# Never touch binaries.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.mp3 binary
+*.ogg binary
+*.wav binary
+
+# Keep generated files out of diffs and language statistics.
+package-lock.json -diff linguist-generated

@@ -1,0 +1,22 @@
+{
+  "name": "@borderfall/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Wire contracts, enums, balance constants and the deterministic world generator shared by client and server.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./enums": "./src/enums/index.ts",
+    "./constants": "./src/constants/index.ts",
+    "./events": "./src/events/index.ts",
+    "./packets": "./src/packets/index.ts",
+    "./interfaces": "./src/interfaces/index.ts",
+    "./utils": "./src/utils/index.ts",
+    "./world": "./src/world/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -b",
+    "test": "vitest run --dir src"
+  },
+  "dependencies": {}
+}

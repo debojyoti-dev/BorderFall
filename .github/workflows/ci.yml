@@ -1,0 +1,172 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  # Supersede in-flight runs for the same ref; only the newest commit matters.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  # Static checks are split from tests so a formatting failure reports in ~40s
+  # rather than waiting behind the full suite.
+  quality:
+    name: Lint, format & types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: Prettier
+        run: npm run format:check
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: TypeScript
+        run: npm run typecheck
+
+  test:
+    name: Unit & integration tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: Vitest
+        run: npm run test:coverage
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage/
+          retention-days: 7
+
+  build:
+    name: Build packages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build
+
+      - name: Upload client bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: client-dist
+          path: client/dist/
+          retention-days: 7
+
+  e2e:
+    name: Renderer end-to-end
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      # Only Chromium: these tests verify our own rendering, not cross-browser
+      # behaviour, and each extra engine adds ~2 minutes of software rendering.
+      - run: npx playwright install --with-deps chromium
+
+      - run: npm run build --workspace=@borderfall/client
+
+      - name: Playwright
+        run: npm run test:e2e
+
+      - name: Upload report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
+  docker:
+    name: Docker images
+    runs-on: ubuntu-latest
+    # Images are expensive to build and only meaningful once the code is known
+    # good, so this gates on the three cheaper jobs.
+    needs: [quality, test, build]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build server image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.server
+          push: false
+          load: true
+          tags: borderfall-server:ci
+          cache-from: type=gha,scope=server
+          cache-to: type=gha,mode=max,scope=server
+
+      - name: Build client image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.client
+          push: false
+          load: true
+          tags: borderfall-client:ci
+          cache-from: type=gha,scope=client
+          cache-to: type=gha,mode=max,scope=client
+
+      - name: Smoke-test the server image
+        run: |
+          docker run -d --name borderfall-smoke -p 3001:3001 \
+            -e JWT_SECRET=ci-smoke-test-secret \
+            -e MONGO_ENABLED=false \
+            borderfall-server:ci
+
+          # Poll rather than sleep, so a fast boot does not pay a fixed penalty
+          # and a slow one still gets a fair chance before failing.
+          for attempt in $(seq 1 30); do
+            if curl -sf http://localhost:3001/health > /dev/null; then
+              echo "Server is healthy after ${attempt} attempt(s)"
+              curl -s http://localhost:3001/health
+              docker rm -f borderfall-smoke
+              exit 0
+            fi
+            sleep 1
+          done
+
+          echo "Server failed to become healthy"
+          docker logs borderfall-smoke
+          docker rm -f borderfall-smoke
+          exit 1

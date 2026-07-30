@@ -1,0 +1,33 @@
+{
+  "name": "@borderfall/client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "BorderFall browser client — React shell around a PixiJS renderer.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b --emitDeclarationOnly false && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -b",
+    "test": "vitest run --dir src"
+  },
+  "dependencies": {
+    "@borderfall/shared": "*",
+    "pixi.js": "^8.6.6",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "socket.io-client": "^4.8.1",
+    "zustand": "^5.0.2"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.0.0",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.1.0",
+    "@types/react": "^19.0.2",
+    "@types/react-dom": "^19.0.2",
+    "@vitejs/plugin-react": "^4.3.4",
+    "jsdom": "^25.0.1",
+    "tailwindcss": "^4.0.0",
+    "vite": "^6.0.5"
+  }
+}

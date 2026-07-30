@@ -1,0 +1,58 @@
+{
+  "name": "borderfall",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "BorderFall — a browser-based massively multiplayer real-time strategy game.",
+  "engines": {
+    "node": ">=20.11.0"
+  },
+  "workspaces": [
+    "shared",
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "dev": "npm-run-all --parallel dev:server dev:client",
+    "dev:server": "npm run dev --workspace=@borderfall/server",
+    "dev:client": "npm run dev --workspace=@borderfall/client",
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "tsc -b --pretty",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:e2e": "playwright test",
+    "docker:up": "docker compose up --build",
+    "docker:down": "docker compose down -v",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.17.0",
+    "@playwright/test": "^1.49.1",
+    "@types/node": "^22.10.2",
+    "@vitest/coverage-v8": "^2.1.8",
+    "eslint": "^9.17.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-import": "^2.31.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^15.2.11",
+    "npm-run-all2": "^7.0.2",
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.18.1",
+    "vitest": "^2.1.8"
+  },
+  "lint-staged": {
+    "*.{ts,tsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,md,css,yml,yaml}": [
+      "prettier --write"
+    ]
+  }
+}

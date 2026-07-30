@@ -1,0 +1,42 @@
+# syntax=docker/dockerfile:1.7
+
+# ---------------------------------------------------------------------------
+# BorderFall web client
+#
+# Vite emits fully static assets, so the runtime image is nginx with no Node at
+# all — a few megabytes instead of a few hundred, and a much smaller attack
+# surface for something that is internet-facing.
+# ---------------------------------------------------------------------------
+
+FROM node:20-alpine AS deps
+WORKDIR /app
+COPY package.json package-lock.json* ./
+COPY shared/package.json ./shared/
+COPY server/package.json ./server/
+COPY client/package.json ./client/
+RUN npm ci --workspaces --include-workspace-root
+
+FROM deps AS build
+WORKDIR /app
+COPY tsconfig.base.json tsconfig.json ./
+COPY shared ./shared
+COPY client ./client
+
+# The server URL is baked in at build time — Vite performs static replacement,
+# so this cannot be supplied at container start. Deployments that need to vary
+# it build a separate image per environment.
+ARG VITE_SERVER_URL=""
+ENV VITE_SERVER_URL=$VITE_SERVER_URL
+
+RUN npm run build --workspace=@borderfall/client
+
+FROM nginx:1.27-alpine AS runtime
+COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /app/client/dist /usr/share/nginx/html
+
+EXPOSE 80
+
+HEALTHCHECK --interval=15s --timeout=3s --start-period=5s --retries=3 \
+  CMD wget --quiet --tries=1 --spider http://127.0.0.1/ || exit 1
+
+CMD ["nginx", "-g", "daemon off;"]

@@ -1,0 +1,73 @@
+name: borderfall
+
+services:
+  server:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.server
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      CORS_ORIGINS: http://localhost:8080
+      JWT_SECRET: ${JWT_SECRET:-dev-insecure-secret-change-me}
+      MONGO_ENABLED: ${MONGO_ENABLED:-true}
+      MONGO_URI: mongodb://mongo:27017/borderfall
+      REDIS_ENABLED: ${REDIS_ENABLED:-false}
+      REDIS_URL: redis://redis:6379
+      LOG_JSON: 'true'
+      LOG_LEVEL: info
+    ports:
+      - '3001:3001'
+    depends_on:
+      mongo:
+        condition: service_healthy
+    restart: unless-stopped
+    # The simulation is single-threaded per match and latency-sensitive; a hard
+    # CPU limit below 1 core would cause tick overruns rather than slow play.
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+
+  client:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.client
+      args:
+        VITE_SERVER_URL: ''
+    ports:
+      - '8080:80'
+    depends_on:
+      - server
+    restart: unless-stopped
+
+  mongo:
+    image: mongo:7
+    command: ['--wiredTigerCacheSizeGB', '1']
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      # Compose waits for this before starting the server, so the first
+      # persistence write cannot race an unready database.
+      test: ['CMD', 'mongosh', '--quiet', '--eval', "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    # Redis holds only ephemeral coordination state (socket adapter, matchmaking
+    # queue). Losing it costs a reconnect, never game data, so persistence off.
+    command: ['redis-server', '--save', '', '--appendonly', 'no']
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  mongo-data:
