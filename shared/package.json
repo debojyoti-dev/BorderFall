@@ -12,7 +12,8 @@
     "./packets": "./src/packets/index.ts",
     "./interfaces": "./src/interfaces/index.ts",
     "./utils": "./src/utils/index.ts",
-    "./world": "./src/world/index.ts"
+    "./world": "./src/world/index.ts",
+    "./sim": "./src/sim/index.ts"
   },
   "scripts": {
     "typecheck": "tsc -b",

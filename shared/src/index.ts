@@ -21,6 +21,7 @@ export * from './packets/index.js';
 export * from './events/index.js';
 export * from './utils/index.js';
 export * from './world/index.js';
+export * from './sim/index.js';
 
 /** Bumped whenever a wire format changes incompatibly. */
 export const PROTOCOL_VERSION = 1;
