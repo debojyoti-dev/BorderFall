@@ -5,3 +5,8 @@ export * from './voronoi.js';
 export * from './terrain.js';
 export * from './generator.js';
 export * from './WorldReader.js';
+export * from './TileMap.js';
+export * from './tilegen.js';
+export * from './TileHeap.js';
+export * from './TileWorld.js';
+export * from './Conquest.js';
