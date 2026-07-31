@@ -103,6 +103,33 @@ export class MatchInstance {
     this.scheduler.register(system);
   }
 
+  /** Looks up a registered system by name. */
+  getSystem<T extends ISimulationSystem>(name: string): T | undefined {
+    return this.scheduler.getSystems().find((system) => system.name === name) as T | undefined;
+  }
+
+  /**
+   * Simulation time since start, in ms.
+   *
+   * Distinct from {@link elapsedMs}, which is wall clock. Anything the
+   * simulation schedules — army arrival, construction completion, cooldowns
+   * inside a system — must use this, or a replay will not reproduce it.
+   */
+  /**
+   * The simulation RNG.
+   *
+   * Exposed so a headless harness (replay verification, load tests) can build
+   * system contexts the same way the live loop does, and therefore reproduce a
+   * match exactly.
+   */
+  get simulationRng(): Rng {
+    return this.rng;
+  }
+
+  get elapsedSimMs(): number {
+    return this.scheduler.elapsedMs;
+  }
+
   start(): void {
     if (this.state !== MatchState.Lobby && this.state !== MatchState.Starting) return;
 

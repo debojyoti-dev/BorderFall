@@ -52,6 +52,7 @@ export function encodeSnapshot(
     building: new Uint8Array(state.building),
     buildingLevel: new Uint8Array(state.buildingLevel),
     construction: new Uint8Array(state.construction),
+    contested: new Uint8Array(state.contested),
     // Ships and missiles arrive in phases 6 and 7. The fields exist now so the
     // client decoder is final and does not need reworking when they land.
     ships: [],
@@ -84,6 +85,7 @@ export function encodeDelta(
   const building = new Uint8Array(count);
   const buildingLevel = new Uint8Array(count);
   const construction = new Uint8Array(count);
+  const contested = new Uint8Array(count);
 
   for (let i = 0; i < count; i++) {
     const id = changed[i] as number;
@@ -99,6 +101,7 @@ export function encodeDelta(
     building[i] = state.building[id] as number;
     buildingLevel[i] = state.buildingLevel[id] as number;
     construction[i] = state.construction[id] as number;
+    contested[i] = state.contested[id] as number;
   }
 
   return {
@@ -113,6 +116,7 @@ export function encodeDelta(
     building,
     buildingLevel,
     construction,
+    contested,
     ships: [],
     removedShips: [],
     missiles: [],

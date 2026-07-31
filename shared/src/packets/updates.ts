@@ -71,6 +71,8 @@ export interface WorldSnapshotPacket {
   readonly buildingLevel: Uint8Array;
   /** Construction progress quantised to 0–255. */
   readonly construction: Uint8Array;
+  /** 1 while an assault is resolving on that territory. */
+  readonly contested: Uint8Array;
   readonly ships: readonly ShipView[];
   readonly missiles: readonly MissileView[];
 }
@@ -98,6 +100,7 @@ export interface WorldDeltaPacket {
   readonly building: Uint8Array;
   readonly buildingLevel: Uint8Array;
   readonly construction: Uint8Array;
+  readonly contested: Uint8Array;
 
   /** Ships that moved, spawned or changed state this tick. */
   readonly ships: readonly ShipView[];

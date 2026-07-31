@@ -54,6 +54,12 @@ export function GameCanvas({
         }
 
         const owner = match?.owner[id] ?? OWNER_NONE;
+        const live = {
+          owner,
+          population: match?.population[id] ?? 0,
+          troops: match?.troops[id] ?? 0,
+          contested: (match?.contested[id] ?? 0) === 1,
+        };
         const mine = match !== null && match !== undefined && owner === match.mySlot;
         const source = selectedRef.current;
 
@@ -73,14 +79,14 @@ export function GameCanvas({
           const next = source === id ? -1 : id;
           selectedRef.current = next;
           renderer.setSelected(next);
-          setSelected(next < 0 ? null : summariseTerritory(geometry, next, owner));
+          setSelected(next < 0 ? null : summariseTerritory(geometry, next, live));
           return;
         }
 
         // Clicking a territory that is not yours just inspects it.
         selectedRef.current = -1;
         renderer.setSelected(id);
-        setSelected(summariseTerritory(geometry, id, owner));
+        setSelected(summariseTerritory(geometry, id, live));
       },
       onHoverChanged: setHovered,
       onFrameStats: setStats,
@@ -102,7 +108,14 @@ export function GameCanvas({
           // Keep the inspector consistent with the highlight: the renderer
           // outlining a territory while the panel says "click a territory"
           // reads as a bug.
-          setSelected(summariseTerritory(geometry, id, match.mySlot));
+          setSelected(
+            summariseTerritory(geometry, id, {
+              owner: match.mySlot,
+              population: match.population[id] ?? 0,
+              troops: match.troops[id] ?? 0,
+              contested: false,
+            }),
+          );
           break;
         }
       }

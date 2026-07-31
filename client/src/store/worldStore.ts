@@ -44,11 +44,22 @@ export interface TerritorySummary {
   neighbourCount: number;
   area: number;
   owner: number;
+  population: number;
+  troops: number;
+  contested: boolean;
   building: BuildingType;
   buildingName: string;
   defenceMultiplier: number;
   incomeMultiplier: number;
   growthMultiplier: number;
+}
+
+/** Live per-territory values read out of the replicated arrays. */
+export interface TerritoryLiveState {
+  owner: number;
+  population: number;
+  troops: number;
+  contested: boolean;
 }
 
 interface WorldState {
@@ -90,11 +101,19 @@ export const useWorldStore = create<WorldState>((set) => ({
   setHovered: (hovered) => set({ hovered }),
 }));
 
-/** Builds the inspector summary for a territory from immutable geometry. */
+/**
+ * Builds the inspector summary for a territory.
+ *
+ * Takes a snapshot of the live values rather than a reference, so the panel
+ * shows the state at the moment of selection and does not re-render on every
+ * delta. Population and troops change 20 times a second; a panel that tracked
+ * them live would re-render React at network rate for numbers no one is
+ * reading that precisely.
+ */
 export function summariseTerritory(
   geometry: WorldGeometry,
   id: number,
-  owner = OWNER_NONE,
+  live: Partial<TerritoryLiveState> = {},
 ): TerritorySummary {
   const terrain = geometry.terrain[id] as Terrain;
   const modifiers = TERRAIN_MODIFIERS[terrain];
@@ -106,7 +125,10 @@ export function summariseTerritory(
     neighbourCount:
       (geometry.neighbourOffsets[id + 1] as number) - (geometry.neighbourOffsets[id] as number),
     area: Math.round(geometry.area[id] as number),
-    owner,
+    owner: live.owner ?? OWNER_NONE,
+    population: Math.floor(live.population ?? 0),
+    troops: Math.floor(live.troops ?? 0),
+    contested: live.contested ?? false,
     // Buildings arrive in Phase 5; the field exists so the panel layout is
     // final and does not need reworking when it lands.
     building: BuildingType.None,

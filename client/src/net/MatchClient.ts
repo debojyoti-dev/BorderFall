@@ -44,6 +44,7 @@ export class MatchClient {
   troops = new Uint32Array(0);
   building = new Uint8Array(0);
   buildingLevel = new Uint8Array(0);
+  contested = new Uint8Array(0);
 
   geometry: WorldGeometry | null = null;
   mySlot = -1;
@@ -141,6 +142,7 @@ export class MatchClient {
     this.troops = new Uint32Array(count);
     this.building = new Uint8Array(count);
     this.buildingLevel = new Uint8Array(count);
+    this.contested = new Uint8Array(count);
 
     this.callbacks.onInit?.(geometry, packet);
     // The embedded snapshot crosses the wire as binary too, so it needs the
@@ -173,6 +175,7 @@ export class MatchClient {
     this.troops.set(packet.troops);
     this.building.set(packet.building);
     this.buildingLevel.set(packet.buildingLevel);
+    this.contested.set(packet.contested);
 
     this.lastTick = packet.tick;
     this.callbacks.onFullResync?.();
@@ -215,6 +218,7 @@ export class MatchClient {
       if (fields & TerritoryField.BuildingLevel) {
         this.buildingLevel[id] = packet.buildingLevel[i] as number;
       }
+      if (fields & TerritoryField.Contested) this.contested[id] = packet.contested[i] as number;
 
       changed.push(id);
     }

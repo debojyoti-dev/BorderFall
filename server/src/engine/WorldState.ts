@@ -38,6 +38,8 @@ export class WorldState {
   readonly buildingLevel: Uint8Array;
   /** Construction progress, quantised 0-255 so it fits the wire format. */
   readonly construction: Uint8Array;
+  /** 1 while an assault is resolving here, so clients can flag it visually. */
+  readonly contested: Uint8Array;
 
   /* Dirty tracking --------------------------------------------------------- */
 
@@ -62,6 +64,7 @@ export class WorldState {
     this.building = new Uint8Array(this.territoryCount);
     this.buildingLevel = new Uint8Array(this.territoryCount);
     this.construction = new Uint8Array(this.territoryCount);
+    this.contested = new Uint8Array(this.territoryCount);
 
     this.dirtyFields = new Uint8Array(this.territoryCount);
     this.dirtyList = new Uint16Array(this.territoryCount);
@@ -113,6 +116,13 @@ export class WorldState {
     if (this.construction[id] === quantised) return;
     this.construction[id] = quantised;
     this.markDirty(id, TerritoryField.Construction);
+  }
+
+  setContested(id: number, value: boolean): void {
+    const flag = value ? 1 : 0;
+    if (this.contested[id] === flag) return;
+    this.contested[id] = flag;
+    this.markDirty(id, TerritoryField.Contested);
   }
 
   /* Accessors -------------------------------------------------------------- */

@@ -1,7 +1,7 @@
 # BorderFall — Architecture
 
 > Living document. Updated whenever a system is added or a contract changes.
-> **Last updated:** Phase 3 complete.
+> **Last updated:** Phase 4 complete.
 
 BorderFall is a browser-based massively multiplayer real-time strategy game:
 hundreds of concurrent players contesting a procedurally generated world of
@@ -17,7 +17,7 @@ nuclear weapons and diplomacy.
 | 1     | Monorepo, shared contracts, engine core, DevOps | ✅ Complete    |
 | 2     | PixiJS renderer, camera, world generation       | ✅ Complete    |
 | 3     | Socket.IO rooms, state synchronisation          | ✅ Complete    |
-| 4     | Territory capture, population, economy          | ⬜ Not started |
+| 4     | Territory capture, population, economy          | ✅ Complete    |
 | 5     | Buildings                                       | ⬜ Not started |
 | 6     | Ships and naval combat                          | ⬜ Not started |
 | 7     | Missiles and anti-air                           | ⬜ Not started |
@@ -362,6 +362,81 @@ string.
 
 ---
 
+## 6f. The simulation
+
+Four systems, each owning one slice of state and communicating only through the
+bus.
+
+### Population — logistic, not linear
+
+```
+Δpop = rate · pop · (1 − pop / capacity)
+```
+
+Linear growth makes wide empires unbeatable: every territory adds the same
+absolute output forever, so the leader's advantage compounds without limit and
+the match is decided in the first two minutes. The logistic curve is fast when a
+territory is underpopulated and stalls as it fills, which gives a small player a
+genuine catch-up window and forces a large one to _invest_ in cities to raise
+`capacity` rather than merely holding more dirt.
+
+A flat growth **floor** matters more than it looks: the logistic term is
+proportional to current population, so a territory at zero could never recover
+and conquered land would stay permanently dead.
+
+Troops accrue from population automatically, capped as a fraction of it. Manual
+per-territory mobilisation across hundreds of tiles is data entry, not strategy.
+
+### Economy — two resources on purpose
+
+Gold is the **spending** currency (buildings, ships, missiles); food is the
+**sustaining** one, consumed by armies every tick. Splitting them gives an army
+an ongoing cost rather than only a purchase price, so stockpiling troops is a
+decision with a downside. A single currency collapses that into "save up and
+win". Running out of food disbands troops at 5 %/s, which makes over-extension
+self-correcting instead of free.
+
+The sweep is one pass over territories accumulating into per-slot buckets —
+O(territories), not O(players × territories), which at 200 × 5 000 would be a
+million operations per second.
+
+### Combat — transit and Lanchester attrition
+
+Attacks are no longer instant. An army leaves immediately, spends
+`traversalCost × 900 ms` in transit, then fights over multiple 100 ms ticks.
+
+Transit time is what turns the map into a real space: reinforcing a threatened
+tile becomes possible, mountains become genuinely hard to cross, and an attack
+becomes a decision rather than a click. Phase 3's instant resolution made
+position meaningless.
+
+Attrition follows **Lanchester's square law** — each side loses troops in
+proportion to the _opposing_ force — so combat power scales with the square of
+numbers. That single choice produces the central strategic lever of the genre:
+concentrating force beats spreading it. Under a linear law, two 50-troop attacks
+equal one of 100 and there is never a reason to mass an army.
+
+An army arriving at a target that turned friendly mid-flight reinforces instead
+of attacking, because territories change hands while armies are in transit.
+
+### Victory
+
+A player is eliminated when they hold no territory **and** have no army in
+flight. Checking territory alone would eliminate someone in the one-tick window
+between committing their last garrison and that attack landing.
+
+### Measured at target scale
+
+200 players, 5 000 territories, 60 s of simulation:
+
+| Metric          | Value                       |
+| --------------- | --------------------------- |
+| Wall time       | 12 ms (**5 048× realtime**) |
+| Per master tick | 0.01 ms (budget 50 ms)      |
+| Slowest system  | victory, 0.93 ms peak       |
+
+---
+
 ## 7. Engine core
 
 ### Tick scheduler
@@ -586,3 +661,9 @@ CSR/grid-backed, never nested scans.
 | 20  | Quick play fills the fullest room           | Thinly-spread rooms make a session game feel dead at low population          |
 | 21  | No client-side prediction for capture       | A wrong-colour flicker is worse than the latency it would hide               |
 | 22  | Camera focuses the player's spawn on join   | A fit-to-world view of 5 000 cells shows a new player nothing useful         |
+| 23  | Logistic population growth                  | Linear growth makes wide empires unbeatable and ends matches in minutes      |
+| 24  | Flat growth floor above the logistic term   | Otherwise a territory at zero population can never recover                   |
+| 25  | Lanchester square-law attrition             | Makes concentrating force superior — the core strategic lever of the genre   |
+| 26  | Armies spend time in transit                | Instant attacks make map position meaningless and deny any counterplay       |
+| 27  | Gold and food as separate resources         | Gives an army an ongoing cost, so stockpiling troops has a downside          |
+| 28  | Elimination checks armies, not just land    | Prevents elimination in the tick between committing troops and their arrival |

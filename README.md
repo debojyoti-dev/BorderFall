@@ -7,10 +7,9 @@ conquest, economy, construction, naval power, nuclear weapons and diplomacy.
 The server is authoritative: clients send intentions, the simulation decides
 outcomes. See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the full design.
 
-> **Status: Phase 3 of 10 complete.** Playable multiplayer: join a match, get a
-> starting territory, and take neutral land from adjacent tiles while other
-> players do the same. Population, economy and real combat resolution land in
-> Phase 4.
+> **Status: Phase 4 of 10 complete.** A live simulation: population grows,
+> economies produce, and armies march and fight over multiple ticks. Buildings
+> land in Phase 5.
 
 ---
 
@@ -37,8 +36,9 @@ Open <http://localhost:5173> and press **Quick play**. Open a second browser
 window (or an incognito one, so it gets its own guest identity) to play against
 yourself.
 
-Click one of your territories, then an adjacent one to attack it. Right-click
-clears the selection. Drag to pan, scroll to zoom.
+Click one of your territories, then an adjacent one to attack it. Troops take
+time to march, so watch the border. Right-click clears the selection. Drag to
+pan, scroll to zoom.
 
 ### Docker
 

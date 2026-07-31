@@ -37,12 +37,20 @@ export function TerritoryInspector() {
     <div className="w-64 rounded-lg border border-slate-800 bg-slate-900/85 p-4 backdrop-blur">
       <div className="mb-3 flex items-baseline justify-between">
         <h3 className="text-sm font-medium text-slate-100">{selected.terrainName}</h3>
-        <span className="numeric text-[11px] text-slate-500">#{selected.id}</span>
+        <div className="flex items-center gap-2">
+          {selected.contested && (
+            <span className="rounded bg-rose-950/70 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-rose-300">
+              Under attack
+            </span>
+          )}
+          <span className="numeric text-[11px] text-slate-500">#{selected.id}</span>
+        </div>
       </div>
 
       <dl className="space-y-1.5 text-xs">
+        <Row label="Population" value={selected.population.toLocaleString()} tone="text-sky-300" />
+        <Row label="Troops" value={selected.troops.toLocaleString()} tone="text-rose-300" />
         <Row label="Borders" value={String(selected.neighbourCount)} />
-        <Row label="Area" value={selected.area.toLocaleString()} />
         <Row label="Defence" value={defence.text} tone={defence.tone} />
         <Row label="Income" value={income.text} tone={income.tone} />
         <Row label="Growth" value={growth.text} tone={growth.tone} />
@@ -50,7 +58,7 @@ export function TerritoryInspector() {
       </dl>
 
       <p className="mt-3 border-t border-slate-800 pt-2 text-[11px] leading-relaxed text-slate-500">
-        Population, troops and ownership arrive with the simulation in Phase 4.
+        Values are from the moment you selected this territory. Buildings arrive in Phase 5.
       </p>
     </div>
   );

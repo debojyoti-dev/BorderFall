@@ -4,14 +4,12 @@ import {
   OWNER_NONE,
   PlayerStatus,
   RejectReason,
-  TERRAIN_MODIFIERS,
   fail,
   isFiniteNumberInRange,
   isIntegerInRange,
   ok,
   type AttackCommand,
   type Result,
-  type Terrain,
   type TransferTroopsCommand,
 } from '@borderfall/shared';
 import type { MatchInstance } from './MatchInstance.js';
@@ -30,12 +28,6 @@ import type { Player } from './PlayerRegistry.js';
  * lookups, then the expensive graph query. A flood of malformed packets is
  * rejected without ever touching the world.
  */
-
-export interface CommandResult {
-  readonly captured?: boolean;
-  readonly attackerLosses?: number;
-  readonly defenderLosses?: number;
-}
 
 /** Per-territory attack cooldown, keyed `territoryId`, valued as a timestamp. */
 export type CooldownMap = Map<number, number>;
@@ -98,97 +90,6 @@ export function validateAttack(
   }
 
   return ok({ from, to, troops: committed });
-}
-
-/**
- * Resolves an attack immediately.
- *
- * Phase 3 deliberately resolves in one step so that the command pipeline and
- * state replication can be exercised end to end. Phase 4 replaces this with a
- * tick-driven combat system in which armies spend time in transit and attrition
- * accumulates over several ticks — the validation above is unchanged by that,
- * which is why the two are separate functions.
- */
-export function resolveAttack(
-  match: MatchInstance,
-  player: Player,
-  from: number,
-  to: number,
-  committed: number,
-  roll: number,
-): CommandResult {
-  const world = match.world;
-  const defenderSlot = world.getOwner(to);
-  const defendingTroops = world.troops[to] as number;
-
-  const terrain = match.reader.getTerrain(to) as Terrain;
-  const terrainDefence = TERRAIN_MODIFIERS[terrain].defenceMultiplier;
-  const effectiveDefence = defendingTroops * terrainDefence * COMBAT.baseDefenceBonus;
-
-  // Symmetric variance around 1, so the roll neither systematically favours
-  // nor punishes the attacker.
-  const variance = 1 + (roll * 2 - 1) * COMBAT.randomVariance;
-  const effectiveAttack = committed * variance;
-
-  world.setTroops(from, (world.troops[from] as number) - committed);
-
-  if (effectiveAttack > effectiveDefence) {
-    // Survivors are scaled by how costly the defence was, so taking a fortified
-    // mountain leaves a far weaker occupying force than walking into empty land.
-    const survivorRatio =
-      effectiveDefence <= 0 ? 1 : Math.max(0, 1 - effectiveDefence / effectiveAttack);
-    const survivors = Math.max(1, Math.floor(committed * survivorRatio * COMBAT.occupationRatio));
-
-    if (defenderSlot !== OWNER_NONE) {
-      const defender = match.players.get(defenderSlot);
-      if (defender) {
-        defender.territoriesLost++;
-        defender.deaths++;
-      }
-      player.kills++;
-    }
-    player.territoriesCaptured++;
-
-    world.setOwner(to, player.slot);
-    world.setTroops(to, survivors);
-    // Capturing costs the population dearly; the survivors inherit a fraction.
-    world.setPopulation(to, Math.floor((world.population[to] as number) * 0.35));
-
-    match.bus.emit('territory:captured', {
-      territory: to,
-      previousOwner: defenderSlot,
-      newOwner: player.slot,
-      troopsLost: committed - survivors,
-      tick: match.tick,
-    });
-
-    return {
-      captured: true,
-      attackerLosses: committed - survivors,
-      defenderLosses: defendingTroops,
-    };
-  }
-
-  // Failed assault: the defender loses troops proportional to the damage taken.
-  const defenderLosses =
-    effectiveDefence <= 0
-      ? defendingTroops
-      : Math.floor(defendingTroops * (effectiveAttack / effectiveDefence));
-  world.setTroops(to, Math.max(0, defendingTroops - defenderLosses));
-
-  match.bus.emit('combat:resolved', {
-    from,
-    to,
-    attackerSlot: player.slot,
-    defenderSlot,
-    attackerLosses: committed,
-    defenderLosses,
-    captured: false,
-    critical: false,
-    tick: match.tick,
-  });
-
-  return { captured: false, attackerLosses: committed, defenderLosses };
 }
 
 /* -------------------------------------------------------------------------- */

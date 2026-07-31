@@ -2,30 +2,12 @@ import { GameMode, OWNER_NONE, RejectReason, RoomVisibility } from '@borderfall/
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { MatchInstance } from './MatchInstance.js';
 import type { Player } from './PlayerRegistry.js';
-import { resolveAttack, validateAttack, validateTransfer, type CooldownMap } from './commands.js';
+import { validateAttack, validateTransfer, type CooldownMap } from './commands.js';
 
 /**
  * Command validation is the security boundary. These tests assume a hostile
  * client: every case here is something a modified client would try.
  */
-function makeMatch(): MatchInstance {
-  const match = new MatchInstance(
-    {
-      name: 'test',
-      mode: GameMode.FreeForAll,
-      visibility: RoomVisibility.Public,
-      password: undefined,
-      maxPlayers: 8,
-      territoryCount: 400,
-      seed: 4242,
-      botCount: 0,
-    },
-    'TEST01',
-  );
-  match.start();
-  return match;
-}
-
 /** Finds a land territory with at least one land neighbour. */
 function findLandPair(match: MatchInstance): { from: number; to: number } {
   for (let id = 0; id < match.world.territoryCount; id++) {
@@ -233,65 +215,5 @@ describe('command validation', () => {
     const result = validateTransfer(match, player, { seq: 1, from, to, ratio: 0.4 });
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.value.troops).toBe(40);
-  });
-});
-
-describe('attack resolution', () => {
-  it('captures an undefended neutral territory', () => {
-    const match = makeMatch();
-    const player = match.players.add('a', 'A', false, Date.now())!;
-    const { from, to } = findLandPair(match);
-
-    match.world.setOwner(from, player.slot);
-    match.world.setTroops(from, 100);
-    match.world.setOwner(to, OWNER_NONE);
-    match.world.setTroops(to, 0);
-
-    const result = resolveAttack(match, player, from, to, 50, 0.5);
-
-    expect(result.captured).toBe(true);
-    expect(match.world.getOwner(to)).toBe(player.slot);
-    expect(match.world.troops[to]).toBeGreaterThan(0);
-    // The committed troops must leave the source regardless of outcome.
-    expect(match.world.troops[from]).toBe(50);
-    match.dispose();
-  });
-
-  it('fails against an overwhelming defender and does not transfer ownership', () => {
-    const match = makeMatch();
-    const player = match.players.add('a', 'A', false, Date.now())!;
-    const defender = match.players.add('b', 'B', false, Date.now())!;
-    const { from, to } = findLandPair(match);
-
-    match.world.setOwner(from, player.slot);
-    match.world.setTroops(from, 100);
-    match.world.setOwner(to, defender.slot);
-    match.world.setTroops(to, 10_000);
-
-    const result = resolveAttack(match, player, from, to, 50, 0.5);
-
-    expect(result.captured).toBe(false);
-    expect(match.world.getOwner(to)).toBe(defender.slot);
-    match.dispose();
-  });
-
-  it('credits kills and losses on capture', () => {
-    const match = makeMatch();
-    const attacker = match.players.add('a', 'A', false, Date.now())!;
-    const defender = match.players.add('b', 'B', false, Date.now())!;
-    const { from, to } = findLandPair(match);
-
-    match.world.setOwner(from, attacker.slot);
-    match.world.setTroops(from, 1000);
-    match.world.setOwner(to, defender.slot);
-    match.world.setTroops(to, 1);
-
-    resolveAttack(match, attacker, from, to, 900, 0.5);
-
-    expect(attacker.kills).toBe(1);
-    expect(attacker.territoriesCaptured).toBe(1);
-    expect(defender.deaths).toBe(1);
-    expect(defender.territoriesLost).toBe(1);
-    match.dispose();
   });
 });

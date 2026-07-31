@@ -100,6 +100,7 @@ export function decodeDelta(packet: WorldDeltaPacket): WorldDeltaPacket {
     building: asUint8Array(packet.building),
     buildingLevel: asUint8Array(packet.buildingLevel),
     construction: asUint8Array(packet.construction),
+    contested: asUint8Array(packet.contested),
   };
 }
 
@@ -112,5 +113,6 @@ export function decodeSnapshot(packet: WorldSnapshotPacket): WorldSnapshotPacket
     building: asUint8Array(packet.building),
     buildingLevel: asUint8Array(packet.buildingLevel),
     construction: asUint8Array(packet.construction),
+    contested: asUint8Array(packet.contested),
   };
 }

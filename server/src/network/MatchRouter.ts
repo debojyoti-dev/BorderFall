@@ -1,4 +1,5 @@
 import {
+  COMBAT,
   ConnectionRole,
   MatchState,
   RejectReason,
@@ -15,11 +16,11 @@ import type { MatchManager } from '../match/MatchManager.js';
 import type { Player } from '../match/PlayerRegistry.js';
 import {
   applyTransfer,
-  resolveAttack,
   validateAttack,
   validateTransfer,
   type CooldownMap,
 } from '../match/commands.js';
+import type { CombatSystem } from '../systems/CombatSystem.js';
 import { verifyToken } from '../services/auth.js';
 import { createLogger } from '../utils/logger.js';
 import { Metric, metrics } from '../services/metrics.js';
@@ -280,11 +281,27 @@ export class MatchRouter implements ConnectionHandler {
     }
 
     const { from, to, troops } = validated.value;
-    cooldowns.set(from, now + 500);
+    cooldowns.set(from, now + COMBAT.attackCooldownMs);
 
-    // The roll comes from the match's simulation RNG, never from the client,
-    // and never from Math.random — replays must reproduce this exactly.
-    resolveAttack(match, player, from, to, troops, Math.random());
+    // Troops leave immediately; the battle itself resolves over the following
+    // ticks inside the combat system.
+    match.world.setTroops(from, (match.world.troops[from] as number) - troops);
+
+    /**
+     * Hand off by event, not by method call.
+     *
+     * The router never touches combat maths and the combat system never sees a
+     * socket. Arrival time is computed from simulation time, not wall clock,
+     * so a replay reproduces the battle exactly.
+     */
+    const combat = this.combatFor(match);
+    match.bus.emit('combat:attack-launched', {
+      from,
+      to,
+      attackerSlot: player.slot,
+      troops,
+      arrivesAt: match.elapsedSimMs + (combat?.travelTimeMs(from, to) ?? 0),
+    });
 
     this.ack(socket, command.seq);
   }
@@ -343,6 +360,11 @@ export class MatchRouter implements ConnectionHandler {
       this.broadcasters.set(match.id, broadcaster);
     }
     return broadcaster;
+  }
+
+  /** The match's combat system, for travel-time calculation. */
+  private combatFor(match: MatchInstance): CombatSystem | undefined {
+    return match.getSystem<CombatSystem>('combat');
   }
 
   private cooldownsFor(match: MatchInstance): CooldownMap {

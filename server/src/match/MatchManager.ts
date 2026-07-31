@@ -10,6 +10,7 @@ import { env } from '../config/env.js';
 import { createLogger } from '../utils/logger.js';
 import { Metric, metrics } from '../services/metrics.js';
 import { MatchInstance, type MatchConfig } from './MatchInstance.js';
+import { registerCoreSystems } from '../systems/index.js';
 
 const log = createLogger('matches');
 
@@ -57,6 +58,10 @@ export class MatchManager {
 
     const code = this.allocateCode();
     const match = new MatchInstance(config, code);
+
+    // Systems are registered at creation, before the scheduler starts — it
+    // rejects late registration precisely so ordering cannot change mid-match.
+    registerCoreSystems(match);
 
     this.byId.set(match.id, match);
     this.byCode.set(code, match);
