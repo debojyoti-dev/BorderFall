@@ -5,6 +5,8 @@ import { PROTOCOL_VERSION } from '@borderfall/shared';
 import { env } from '../../config/env.js';
 import { createLogger, errorFields } from '../../utils/logger.js';
 import { Metric, metrics } from '../../services/metrics.js';
+import type { MatchManager } from '../../match/MatchManager.js';
+import { createRoutes } from './routes.js';
 
 const log = createLogger('http');
 
@@ -13,6 +15,8 @@ export interface AppDependencies {
   isReady: () => boolean;
   /** Process start time, for uptime reporting. */
   startedAt: number;
+  /** Match registry backing the lobby endpoints. */
+  matches: MatchManager;
 }
 
 /**
@@ -113,6 +117,12 @@ export function createApp(deps: AppDependencies): Express {
       nodeEnv: env.nodeEnv,
     });
   });
+
+  /* ---------------------------------------------------------------------- */
+  /* Application routes                                                      */
+  /* ---------------------------------------------------------------------- */
+
+  app.use(createRoutes(deps.matches));
 
   /* ---------------------------------------------------------------------- */
   /* Fallbacks                                                               */

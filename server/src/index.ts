@@ -1,7 +1,9 @@
 import { createServer } from 'node:http';
 import { env } from './config/env.js';
 import { createApp } from './network/http/createApp.js';
+import { MatchRouter } from './network/MatchRouter.js';
 import { SocketGateway } from './network/SocketGateway.js';
+import { MatchManager } from './match/MatchManager.js';
 import { createLogger, errorFields } from './utils/logger.js';
 
 const log = createLogger('boot');
@@ -23,15 +25,23 @@ const startedAt = Date.now();
  */
 let accepting = true;
 
+const matches = new MatchManager();
+
 const app = createApp({
   isReady: () => accepting,
   startedAt,
+  matches,
 });
 
 // One HTTP server for both REST and WebSocket. Socket.IO upgrades in place, so
 // a single exposed port keeps ingress and firewall configuration trivial.
 const httpServer = createServer(app);
 const gateway = new SocketGateway(httpServer);
+
+// The router layers match handling on top of the transport, so rate limiting
+// and packet-size guards cannot be bypassed by game code.
+const router = new MatchRouter(matches);
+router.attach(gateway);
 
 httpServer.listen(env.port, env.host, () => {
   log.info('BorderFall server listening', {
@@ -69,6 +79,11 @@ async function shutdown(signal: string): Promise<void> {
   forceExit.unref();
 
   try {
+    // Stop broadcasting and tear matches down before closing sockets, so no
+    // timer fires against a half-closed server during the drain.
+    router.dispose();
+    matches.disposeAll();
+
     await gateway.close();
     await new Promise<void>((resolve, reject) => {
       httpServer.close((error) => (error ? reject(error) : resolve()));

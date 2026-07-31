@@ -105,6 +105,14 @@ export class Camera {
     this.dirty = true;
   }
 
+  /** Sets zoom directly, clamped to the valid range. */
+  zoomTo(zoom: number): void {
+    this.targetZoom = clamp(zoom, this.minZoom, this.maxZoom);
+    this.zoom = this.targetZoom;
+    this.constrain();
+    this.dirty = true;
+  }
+
   /** Pans by a screen-space delta — the direct response to a drag. */
   panByScreen(dxScreen: number, dyScreen: number): void {
     this.targetX -= dxScreen / this.zoom;

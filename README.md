@@ -7,9 +7,10 @@ conquest, economy, construction, naval power, nuclear weapons and diplomacy.
 The server is authoritative: clients send intentions, the simulation decides
 outcomes. See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the full design.
 
-> **Status: Phase 1 of 10 complete.** Monorepo, shared contracts, engine core
-> and transport are in place and verified end to end. The renderer and world
-> generation land in Phase 2.
+> **Status: Phase 3 of 10 complete.** Playable multiplayer: join a match, get a
+> starting territory, and take neutral land from adjacent tiles while other
+> players do the same. Population, economy and real combat resolution land in
+> Phase 4.
 
 ---
 
@@ -32,8 +33,12 @@ cp .env.example .env      # defaults work out of the box for development
 npm run dev               # server on :3001, client on :5173
 ```
 
-Open <http://localhost:5173>. The client connects over WebSocket and displays
-live round-trip latency, jitter and clock offset against the server.
+Open <http://localhost:5173> and press **Quick play**. Open a second browser
+window (or an incognito one, so it gets its own guest identity) to play against
+yourself.
+
+Click one of your territories, then an adjacent one to attack it. Right-click
+clears the selection. Drag to pan, scroll to zoom.
 
 ### Docker
 
@@ -84,6 +89,20 @@ package, so a change to a shared constant hot-reloads straight into the browser.
 | `/metrics`      | Prometheus exposition format     |
 | `/metrics.json` | Same data as JSON, for debugging |
 | `/version`      | Protocol version and environment |
+
+## API
+
+| Method | Route          | Purpose                          |
+| ------ | -------------- | -------------------------------- |
+| `POST` | `/auth/guest`  | Issue a guest identity and JWT   |
+| `GET`  | `/auth/me`     | Verify a stored token            |
+| `GET`  | `/rooms`       | List public rooms                |
+| `GET`  | `/rooms/:code` | Look up a room by its share code |
+| `POST` | `/rooms`       | Create a room (requires a token) |
+
+Gameplay runs entirely over Socket.IO; the REST surface is deliberately limited
+to what is genuinely request/response shaped. See
+[`ARCHITECTURE.md`](./ARCHITECTURE.md) for the socket event contract.
 
 ---
 

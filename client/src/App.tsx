@@ -1,56 +1,137 @@
-import { useEffect, useState } from 'react';
-import { PROTOCOL_VERSION, randomSeed } from '@borderfall/shared';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { PROTOCOL_VERSION, type WorldGeometry } from '@borderfall/shared';
 import { ConnectionBadge } from './components/ConnectionBadge.js';
+import { Leaderboard, ResourceBar } from './components/MatchHud.js';
+import { Lobby } from './components/Lobby.js';
 import { TerritoryInspector } from './components/TerritoryInspector.js';
 import { GameCanvas } from './game/GameCanvas.js';
-import { useConnectionStore } from './store/connectionStore.js';
-import { useWorldStore } from './store/worldStore.js';
+import { MatchClient } from './net/MatchClient.js';
+import { installDebugHooks } from './net/debug.js';
+import * as api from './net/api.js';
+import { socketClient, useConnectionStore } from './store/connectionStore.js';
+import { useMatchStore } from './store/matchStore.js';
 
 /**
  * Application shell.
  *
- * Phase 2 scope: a procedurally generated world, rendered and navigable. The
- * map is generated *locally* from a seed — exactly as it will be in Phase 3,
- * except that the seed will then come from the server's `match:init` packet
- * instead of a button. That is the point of the seed-replication design: the
- * client-side code path does not change when multiplayer lands.
+ * Two screens: the lobby and a live match. The world is rebuilt locally from
+ * the seed in `match:init` — the same code path Phase 2 exercised with a text
+ * box, now driven by the server. That the client-side path did not change when
+ * multiplayer landed is the point of the seed-replication design.
  */
 export function App() {
   const connect = useConnectionStore((state) => state.connect);
-  const disconnect = useConnectionStore((state) => state.disconnect);
+  const status = useConnectionStore((state) => state.status);
 
-  const geometry = useWorldStore((state) => state.geometry);
-  const params = useWorldStore((state) => state.params);
-  const generating = useWorldStore((state) => state.generating);
-  const generationMs = useWorldStore((state) => state.generationMs);
-  const generate = useWorldStore((state) => state.generate);
+  const phase = useMatchStore((state) => state.phase);
+  const setPhase = useMatchStore((state) => state.setPhase);
+  const setRooms = useMatchStore((state) => state.setRooms);
+  const setRoomsLoading = useMatchStore((state) => state.setRoomsLoading);
+  const setPlayers = useMatchStore((state) => state.setPlayers);
+  const setResources = useMatchStore((state) => state.setResources);
+  const setLeaderboard = useMatchStore((state) => state.setLeaderboard);
+  const setRejection = useMatchStore((state) => state.setRejection);
+  const setMySlot = useMatchStore((state) => state.setMySlot);
+  const setError = useMatchStore((state) => state.setError);
 
-  const [seedInput, setSeedInput] = useState('2026');
+  const [geometry, setGeometry] = useState<WorldGeometry | null>(null);
+  const matchRef = useRef<MatchClient | null>(null);
 
+  /* Connect and authenticate once, at start-up. ------------------------- */
   useEffect(() => {
-    connect();
+    let cancelled = false;
+
+    void (async () => {
+      // A guest identity is obtained before connecting so the socket handshake
+      // carries a token and the server never has to deal with an unidentified
+      // connection.
+      const token = await api.ensureGuestToken();
+      if (cancelled) return;
+
+      connect(token ? { token } : undefined);
+
+      const client = new MatchClient(socketClient, {
+        onPlayers: setPlayers,
+        onResources: setResources,
+        onLeaderboard: setLeaderboard,
+        onCommandRejected: (_seq, reason) => {
+          setRejection(reason);
+          // Clear after a moment so the bar does not accumulate stale errors.
+          setTimeout(() => setRejection(null), 2500);
+        },
+        onNotice: (text, severity) => {
+          if (severity === 'error') setError(text);
+        },
+      });
+      client.attach();
+      matchRef.current = client;
+      installDebugHooks(client);
+    })();
+
     return () => {
-      // See the note in Phase 1: the socket is a page-lifetime resource, and
-      // Strict Mode's double mount would otherwise tear it down permanently.
-      if (import.meta.env.PROD) disconnect();
+      cancelled = true;
     };
-  }, [connect, disconnect]);
+  }, [connect, setPlayers, setResources, setLeaderboard, setRejection, setError]);
 
-  // Generate an initial world on first mount so there is something to look at.
-  useEffect(() => {
-    if (!geometry) generate(2026);
-  }, [geometry, generate]);
+  /* Lobby actions -------------------------------------------------------- */
 
-  const handleGenerate = () => {
-    const parsed = Number.parseInt(seedInput, 10);
-    generate(Number.isFinite(parsed) ? parsed : randomSeed());
-  };
+  const refreshRooms = useCallback(async () => {
+    setRoomsLoading(true);
+    try {
+      setRooms(await api.listRooms());
+    } catch {
+      // A failed refresh is not worth an error banner — the list simply stays
+      // as it was and the next poll will retry.
+    } finally {
+      setRoomsLoading(false);
+    }
+  }, [setRooms, setRoomsLoading]);
 
-  const handleRandom = () => {
-    const seed = randomSeed();
-    setSeedInput(String(seed));
-    generate(seed);
-  };
+  const join = useCallback(
+    async (roomId: string, password?: string) => {
+      const client = matchRef.current;
+      if (!client) return;
+
+      setPhase('joining');
+      setError(null);
+
+      const result = await client.join(roomId, password);
+      if (!result) {
+        setPhase('lobby');
+        setError('Could not join that match.');
+        return;
+      }
+
+      setMySlot(result.yourSlot);
+      setGeometry(client.geometry);
+      setPhase('playing');
+    },
+    [setPhase, setError, setMySlot],
+  );
+
+  const createRoom = useCallback(
+    async (name: string, territoryCount: number) => {
+      setPhase('joining');
+      try {
+        const room = await api.createRoom(name, territoryCount);
+        if (!room) throw new Error('create failed');
+        await join(room.id);
+      } catch {
+        setPhase('lobby');
+        setError('Could not create the match.');
+      }
+    },
+    [join, setPhase, setError],
+  );
+
+  const leave = useCallback(() => {
+    matchRef.current?.leave(true);
+    setGeometry(null);
+    setPhase('lobby');
+    setMySlot(-1);
+  }, [setPhase, setMySlot]);
+
+  const inMatch = phase === 'playing' && geometry !== null;
 
   return (
     <div className="flex h-full flex-col bg-slate-950">
@@ -60,79 +141,48 @@ export function App() {
           <span className="text-[11px] text-slate-500">protocol v{PROTOCOL_VERSION}</span>
         </div>
 
-        <div className="flex items-center gap-2">
-          <label className="sr-only" htmlFor="seed">
-            Map seed
-          </label>
-          <input
-            id="seed"
-            value={seedInput}
-            onChange={(event) => setSeedInput(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') handleGenerate();
-            }}
-            className="numeric w-32 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-200 outline-none focus:border-sky-600"
-            placeholder="seed"
-          />
-          <button
-            onClick={handleGenerate}
-            disabled={generating}
-            className="rounded border border-slate-700 bg-slate-800 px-2.5 py-1 text-xs text-slate-200 hover:bg-slate-700 disabled:opacity-50"
-          >
-            Generate
-          </button>
-          <button
-            onClick={handleRandom}
-            disabled={generating}
-            className="rounded border border-slate-700 bg-slate-800 px-2.5 py-1 text-xs text-slate-200 hover:bg-slate-700 disabled:opacity-50"
-          >
-            Random
-          </button>
+        <div className="flex items-center gap-3">
+          {inMatch && <ResourceBar />}
+          {inMatch && (
+            <button
+              onClick={leave}
+              data-testid="leave-match"
+              className="rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-700"
+            >
+              Leave
+            </button>
+          )}
           <ConnectionBadge />
         </div>
       </header>
 
       <main className="relative flex-1 overflow-hidden">
-        {geometry ? (
-          <GameCanvas geometry={geometry} />
-        ) : (
-          <div className="flex size-full items-center justify-center text-sm text-slate-500">
-            Generating world…
-          </div>
-        )}
-
-        <div
-          data-testid="hud-panels"
-          className="hud-layer absolute right-4 top-4 flex flex-col gap-3"
-        >
-          <TerritoryInspector />
-
-          {geometry && params && (
-            <div className="w-64 rounded-lg border border-slate-800 bg-slate-900/85 p-4 text-xs backdrop-blur">
-              <h3 className="mb-2 text-sm font-medium text-slate-100">World</h3>
-              <dl className="space-y-1.5">
-                <Row label="Seed" value={String(params.seed)} />
-                <Row label="Territories" value={geometry.territoryCount.toLocaleString()} />
-                <Row label="Spawns" value={String(geometry.spawnCandidates.length)} />
-                <Row label="Generated in" value={`${generationMs} ms`} />
-              </dl>
-              <p className="mt-3 border-t border-slate-800 pt-2 text-[11px] leading-relaxed text-slate-500">
-                Drag to pan, scroll to zoom, click to select. The server sends only this seed — the
-                map is rebuilt locally.
+        {inMatch ? (
+          <>
+            <GameCanvas geometry={geometry} match={matchRef.current} />
+            <div className="hud-layer absolute right-4 top-4 flex flex-col gap-3">
+              <Leaderboard />
+              <TerritoryInspector />
+            </div>
+            <div className="hud-layer absolute bottom-3 right-4">
+              <p className="rounded border border-slate-800 bg-slate-900/85 px-3 py-2 text-[11px] text-slate-400 backdrop-blur">
+                Click your territory, then an adjacent one to attack. Right-click to clear.
               </p>
             </div>
-          )}
-        </div>
+          </>
+        ) : status === 'connected' || status === 'reconnecting' ? (
+          <Lobby
+            onQuickPlay={() => void join('')}
+            onJoinRoom={(roomId, password) => void join(roomId, password)}
+            onCreateRoom={(name, count) => void createRoom(name, count)}
+            onRefresh={() => void refreshRooms()}
+          />
+        ) : (
+          <div className="flex size-full items-center justify-center text-sm text-slate-500">
+            Connecting to the server…
+          </div>
+        )}
       </main>
-    </div>
-  );
-}
-
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between">
-      <dt className="text-slate-400">{label}</dt>
-      <dd className="numeric text-slate-200">{value}</dd>
     </div>
   );
 }

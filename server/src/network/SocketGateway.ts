@@ -37,6 +37,20 @@ interface ConnectionState {
 }
 
 /**
+ * Registered by feature modules to attach their own event handlers.
+ *
+ * The gateway owns transport concerns only — rate limits, packet size,
+ * connection accounting — and knows nothing about matches. Feature routing is
+ * layered on through this hook, which keeps the abuse-prevention layer
+ * impossible to bypass from game code and keeps the gateway testable without
+ * constructing a match.
+ */
+export interface ConnectionHandler {
+  onConnect(socket: GameSocket, gateway: SocketGateway): void;
+  onDisconnect(socket: GameSocket, reason: string): void;
+}
+
+/**
  * Owns the Socket.IO server and everything that is true of *every* connection,
  * regardless of which match it belongs to: transport configuration, rate
  * limiting, packet-size guards, latency probes and connection accounting.
@@ -49,6 +63,7 @@ interface ConnectionState {
 export class SocketGateway {
   private readonly io: GameServer;
   private readonly connections = new Map<string, ConnectionState>();
+  private readonly handlers: ConnectionHandler[] = [];
 
   constructor(httpServer: HttpServer) {
     this.io = new Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>(
@@ -115,6 +130,19 @@ export class SocketGateway {
     });
 
     socket.on('disconnect', (reason) => {
+      // Feature handlers run before the connection record is dropped, so they
+      // can still read the socket's slot and room while cleaning up.
+      for (const handler of this.handlers) {
+        try {
+          handler.onDisconnect(socket, reason);
+        } catch (error) {
+          log.error('Disconnect handler threw', {
+            socketId: socket.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+
       this.connections.delete(socket.id);
       metrics.increment(Metric.socketDisconnections);
       metrics.setGauge(Metric.socketsActive, this.connections.size);
@@ -124,6 +152,22 @@ export class SocketGateway {
         lifetimeMs: Date.now() - socket.data.connectedAt,
       });
     });
+
+    for (const handler of this.handlers) {
+      try {
+        handler.onConnect(socket, this);
+      } catch (error) {
+        log.error('Connect handler threw', {
+          socketId: socket.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  }
+
+  /** Registers a feature module's per-connection handlers. */
+  use(handler: ConnectionHandler): void {
+    this.handlers.push(handler);
   }
 
   /**

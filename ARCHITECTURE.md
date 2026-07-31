@@ -1,7 +1,7 @@
 # BorderFall — Architecture
 
 > Living document. Updated whenever a system is added or a contract changes.
-> **Last updated:** Phase 2 complete.
+> **Last updated:** Phase 3 complete.
 
 BorderFall is a browser-based massively multiplayer real-time strategy game:
 hundreds of concurrent players contesting a procedurally generated world of
@@ -16,7 +16,7 @@ nuclear weapons and diplomacy.
 | ----- | ----------------------------------------------- | -------------- |
 | 1     | Monorepo, shared contracts, engine core, DevOps | ✅ Complete    |
 | 2     | PixiJS renderer, camera, world generation       | ✅ Complete    |
-| 3     | Socket.IO rooms, state synchronisation          | ⬜ Not started |
+| 3     | Socket.IO rooms, state synchronisation          | ✅ Complete    |
 | 4     | Territory capture, population, economy          | ⬜ Not started |
 | 5     | Buildings                                       | ⬜ Not started |
 | 6     | Ships and naval combat                          | ⬜ Not started |
@@ -260,6 +260,108 @@ makes coasting distance frame-rate dependent even when the decay is not — one
 
 ---
 
+## 6c. Match hosting
+
+One process hosts many matches. `MatchInstance` owns everything for one game —
+world, players, event bus, tick loop — with no module-level state, which is what
+makes that possible and what lets a test construct a match, drive it with
+synthetic time, and assert on it without a socket in sight.
+
+```
+MatchManager          registry, quick-play matchmaking, reaping
+  └─ MatchInstance    world + players + scheduler + bus
+       ├─ WorldState  authoritative SoA + dirty tracking
+       └─ PlayerRegistry
+MatchRouter           socket → match, command validation
+  └─ StateBroadcaster snapshots, deltas, resources, standings
+```
+
+**Quick play joins the fullest room with space, not the emptiest.** Spreading
+players thinly across half-empty rooms is what makes a session-based game feel
+dead at low population.
+
+**Slots are never recycled.** A slot freed by a departing player and reissued
+would be applied by any delta still in flight to the _new_ occupant, briefly
+painting territories the wrong colour. Two bytes per slot is far cheaper than
+reasoning about that race.
+
+**A disconnect does not forfeit territory.** Players keep their empire for a
+90-second grace period; dropping it on a network blip would make a hiccup
+unrecoverable and reward opponents for nothing. A reconnect token reclaims the
+slot.
+
+---
+
+## 6d. State replication
+
+Every mutation goes through a `WorldState` setter that records the territory
+_and_ the specific field that changed. Extraction is therefore O(changed), not
+O(world) — which matters when the question "what changed?" is asked 20 times a
+second.
+
+| Packet               | Rate    | Contents                                        |
+| -------------------- | ------- | ----------------------------------------------- |
+| `match:init`         | on join | Map **seed**, roster, reconnect token, snapshot |
+| `world:delta`        | 20 Hz   | Changed territories only, as typed arrays       |
+| `world:snapshot`     | 10 s    | Keyframe, for gap recovery                      |
+| `player:resources`   | 20 Hz   | **Unicast** — gold and food are private         |
+| `leaderboard:update` | 2 s     | Public standings                                |
+
+A delta carries `ids`, a `fields` bitmask, and parallel value arrays. Typed
+arrays cannot be sparse, so every value slot is populated; entries whose bit is
+unset hold stale data the client must ignore.
+
+`encodeDelta` returns `null` when nothing changed, so an idle match sends no
+traffic at all rather than 20 empty packets a second per player.
+
+Standings run on a separate 2-second timer because recomputing them is
+O(players × territories) — doing that at broadcast rate would dominate the CPU
+budget for something a human reads a few times a minute.
+
+### The Socket.IO binary trap
+
+**Socket.IO does not preserve typed-array views.** A `Uint16Array` sent by the
+server arrives as a `Buffer` in Node and an `ArrayBuffer` in the browser:
+
+```
+server: new Uint16Array([1, 2, 3])   // 3 elements
+client: <Buffer 01 00 02 00 03 00>   // .length === 6
+        received[0] === 1            // correct by coincidence
+        received[1] === 0            // silently wrong — should be 2
+```
+
+Index 0 reads correctly for small little-endian values, so a naive check passes
+against entirely broken data while every loop over `.length` runs twice too
+long. **Every received binary packet must go through `decodeDelta` /
+`decodeSnapshot`** (`shared/src/packets/decode.ts`), which copies rather than
+wraps — Node `Buffer`s come from a shared pool, so their `byteOffset` is
+routinely misaligned and wrapping would throw intermittently.
+
+---
+
+## 6e. Command pipeline
+
+```
+authenticate (at connect)  →  rate-limit  →  validate  →  mutate  →  acknowledge
+```
+
+Identity is resolved once from the handshake token, never per command: a handler
+that re-read a client-supplied identity would trust the client with the most
+security-critical value in the system.
+
+Rate limiting runs _before_ validation — the limiter exists to make a flood
+cheap to reject, which it cannot do if validation runs first.
+
+Validation is ordered cheapest-first: type checks, then bounds, then state
+lookups, then the graph query. Adjacency is always re-derived from the neighbour
+graph; without that check a modified client could strike anywhere on the map.
+
+Rejections return a numeric `RejectReason`, never prose — allocation-free on the
+hot path, and no opportunity to leak an opponent's troop count through an error
+string.
+
+---
+
 ## 7. Engine core
 
 ### Tick scheduler
@@ -460,20 +562,27 @@ CSR/grid-backed, never nested scans.
 
 ## 13. Decision log
 
-| #   | Decision                                    | Rationale                                                                  |
-| --- | ------------------------------------------- | -------------------------------------------------------------------------- |
-| 1   | Seed-based map replication                  | 4 bytes instead of ~2 MB; makes 5 000 territories viable                   |
-| 2   | Structure-of-arrays world state             | Cache locality at 5 000 entities; zero-copy worker transfer                |
-| 3   | Single master tick, per-system accumulators | Deterministic ordering; timer-jitter immunity; clockless replay            |
-| 4   | Deferred event dispatch                     | Prevents mutation-during-iteration in SoA storage                          |
-| 5   | Per-system forked RNG streams               | A balance tweak in one system cannot perturb another or invalidate replays |
-| 6   | Ratios rather than absolute troop counts    | Removes latency-induced command rejections                                 |
-| 7   | World state outside React                   | 20 Hz × 5 000 entities through a store would destroy the frame budget      |
-| 8   | `shared/` ships TS source, not `dist/`      | No build-order dependency; cross-package hot reload                        |
-| 9   | Numeric reject codes                        | Allocation-free rejection path; no information leak                        |
-| 10  | WebSocket-only transport                    | A silent polling downgrade is worse than a visible failure                 |
-| 11  | Voronoi by half-plane clipping              | Robust under float arithmetic; Delaunay duality fails _silently_           |
-| 12  | Percentile-derived terrain thresholds       | Absolute cutoffs gave 0 % mountains; percentiles hold on every seed        |
-| 13  | Chunked renderer with dirty rebuild         | Per-territory nodes or a single mesh both fail at 5 000 polygons           |
-| 14  | Nearest-centroid picking                    | Equivalent to point-in-polygon for Voronoi, at O(1) instead of O(n)        |
-| 15  | Analytic inertia integration                | Euler stepping makes coast distance frame-rate dependent                   |
+| #   | Decision                                    | Rationale                                                                    |
+| --- | ------------------------------------------- | ---------------------------------------------------------------------------- |
+| 1   | Seed-based map replication                  | 4 bytes instead of ~2 MB; makes 5 000 territories viable                     |
+| 2   | Structure-of-arrays world state             | Cache locality at 5 000 entities; zero-copy worker transfer                  |
+| 3   | Single master tick, per-system accumulators | Deterministic ordering; timer-jitter immunity; clockless replay              |
+| 4   | Deferred event dispatch                     | Prevents mutation-during-iteration in SoA storage                            |
+| 5   | Per-system forked RNG streams               | A balance tweak in one system cannot perturb another or invalidate replays   |
+| 6   | Ratios rather than absolute troop counts    | Removes latency-induced command rejections                                   |
+| 7   | World state outside React                   | 20 Hz × 5 000 entities through a store would destroy the frame budget        |
+| 8   | `shared/` ships TS source, not `dist/`      | No build-order dependency; cross-package hot reload                          |
+| 9   | Numeric reject codes                        | Allocation-free rejection path; no information leak                          |
+| 10  | WebSocket-only transport                    | A silent polling downgrade is worse than a visible failure                   |
+| 11  | Voronoi by half-plane clipping              | Robust under float arithmetic; Delaunay duality fails _silently_             |
+| 12  | Percentile-derived terrain thresholds       | Absolute cutoffs gave 0 % mountains; percentiles hold on every seed          |
+| 13  | Chunked renderer with dirty rebuild         | Per-territory nodes or a single mesh both fail at 5 000 polygons             |
+| 14  | Nearest-centroid picking                    | Equivalent to point-in-polygon for Voronoi, at O(1) instead of O(n)          |
+| 15  | Analytic inertia integration                | Euler stepping makes coast distance frame-rate dependent                     |
+| 16  | Field-level dirty tracking in `WorldState`  | Delta extraction is O(changed), not O(5 000), at 20 Hz                       |
+| 17  | Explicit binary decode on every packet      | Socket.IO drops typed-array views; raw reads are silently wrong past index 0 |
+| 18  | Slots are never recycled                    | An in-flight delta would repaint territories for the wrong player            |
+| 19  | Territory retained through reconnect grace  | A network blip must not forfeit an empire                                    |
+| 20  | Quick play fills the fullest room           | Thinly-spread rooms make a session game feel dead at low population          |
+| 21  | No client-side prediction for capture       | A wrong-colour flicker is worse than the latency it would hide               |
+| 22  | Camera focuses the player's spawn on join   | A fit-to-world view of 5 000 cells shows a new player nothing useful         |

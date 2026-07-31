@@ -14,6 +14,15 @@ import { TerritoryLayer, type TerritoryLayerState } from './TerritoryLayer.js';
  */
 
 export interface RendererCallbacks {
+  /**
+   * A territory was clicked.
+   *
+   * The renderer reports the raw click and takes no view on what it means.
+   * Deciding whether a click selects, attacks or reinforces requires knowing
+   * ownership and alliances, which is application state — pushing that
+   * knowledge into the renderer would couple drawing to game rules.
+   */
+  onTerritoryClick?(territoryId: number, isSecondary: boolean): void;
   onSelectionChanged?(territoryId: number): void;
   onHoverChanged?(territoryId: number): void;
   onFrameStats?(stats: FrameStats): void;
@@ -99,14 +108,8 @@ export class GameRenderer {
         this.state.hovered = id;
         this.callbacks.onHoverChanged?.(id);
       },
-      onSelect: (id) => {
-        this.state.selected = this.state.selected === id ? -1 : id;
-        this.callbacks.onSelectionChanged?.(this.state.selected);
-      },
-      onContext: () => {
-        this.state.selected = -1;
-        this.callbacks.onSelectionChanged?.(-1);
-      },
+      onSelect: (id) => this.callbacks.onTerritoryClick?.(id, false),
+      onContext: (id) => this.callbacks.onTerritoryClick?.(id, true),
     });
 
     this.resizeObserver = new ResizeObserver(() => {
@@ -162,17 +165,52 @@ export class GameRenderer {
     );
   }
 
-  /** Replaces owner state and invalidates affected chunks. Used from Phase 3. */
-  setOwners(owner: Uint16Array): void {
+  /**
+   * Adopts an externally owned owner buffer.
+   *
+   * The renderer reads the network layer's array directly rather than keeping a
+   * copy: at 5 000 entries updated 20 times a second, copying would be pure
+   * waste, and a second copy is a second thing that can go stale.
+   */
+  attachOwnerBuffer(owner: Uint16Array): void {
     this.state.owner = owner;
     this.territoryLayer?.invalidateAll();
   }
 
-  /** Applies a single ownership change, dirtying only the affected chunk. */
-  setOwner(territoryId: number, ownerSlot: number): void {
-    if (this.state.owner[territoryId] === ownerSlot) return;
-    this.state.owner[territoryId] = ownerSlot;
-    this.territoryLayer?.invalidateTerritory(territoryId);
+  /** Marks specific territories for redraw after a delta. */
+  invalidateTerritories(ids: readonly number[]): void {
+    const layer = this.territoryLayer;
+    if (!layer) return;
+    for (const id of ids) layer.invalidateTerritory(id);
+  }
+
+  /** Redraws everything — used after a snapshot replaces all state. */
+  invalidateAll(): void {
+    this.territoryLayer?.invalidateAll();
+  }
+
+  /** Sets the highlighted territory. Selection policy lives in the app. */
+  setSelected(territoryId: number): void {
+    this.state.selected = territoryId;
+    this.callbacks.onSelectionChanged?.(territoryId);
+  }
+
+  /**
+   * Centres the camera on a territory at a readable zoom.
+   *
+   * Used on join to put the player at their own starting position. Landing on
+   * a fit-to-world view of 5 000 territories leaves a new player with no idea
+   * which speck is theirs, which is a poor first ten seconds.
+   */
+  focusTerritory(territoryId: number, zoom = 1.6): void {
+    if (!this.world.isValidId(territoryId)) return;
+    this.camera.zoomTo(zoom);
+    this.camera.panTo(
+      this.world.getCentroidX(territoryId),
+      this.world.getCentroidY(territoryId),
+      true,
+    );
+    this.setSelected(territoryId);
   }
 
   getCamera(): Camera {

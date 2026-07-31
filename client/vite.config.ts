@@ -4,6 +4,30 @@ import react from '@vitejs/plugin-react';
 // `vitest/config` rather than `vite` so the `test` block below is type-checked.
 import { defineConfig } from 'vitest/config';
 
+/**
+ * Proxy rules shared by the dev and preview servers.
+ *
+ * Keeping the browser on a single origin sidesteps CORS entirely and makes the
+ * local topology match the deployed one, so origin-related bugs surface here
+ * rather than after a deploy. The target is configurable because the end-to-end
+ * suite runs the API on a separate port from the development default.
+ */
+function proxyConfig() {
+  const target = process.env['BORDERFALL_SERVER_ORIGIN'] ?? 'http://localhost:3001';
+  return {
+    '/api': {
+      target,
+      changeOrigin: true,
+      rewrite: (path: string) => path.replace(/^\/api/, ''),
+    },
+    '/socket.io': {
+      target,
+      ws: true,
+      changeOrigin: true,
+    },
+  };
+}
+
 export default defineConfig({
   plugins: [react(), tailwindcss()],
 
@@ -25,24 +49,16 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
-    proxy: {
-      /**
-       * Proxying keeps the browser on a single origin in development, which
-       * sidesteps CORS entirely and — more importantly — makes the dev
-       * environment match the production reverse-proxy topology, so
-       * origin-related bugs surface locally instead of at deploy time.
-       */
-      '/api': {
-        target: 'http://localhost:3001',
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, ''),
-      },
-      '/socket.io': {
-        target: 'http://localhost:3001',
-        ws: true,
-        changeOrigin: true,
-      },
-    },
+    proxy: proxyConfig(),
+  },
+
+  /**
+   * The preview server proxies too, so the production bundle can be exercised
+   * end to end against a real backend. In an actual deployment nginx fills this
+   * role — see `docker/nginx.conf`.
+   */
+  preview: {
+    proxy: proxyConfig(),
   },
 
   build: {
