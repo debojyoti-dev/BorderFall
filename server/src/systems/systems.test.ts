@@ -41,6 +41,11 @@ function makeContext(bus: EventBus, elapsedMs = 0, tick = 0, seed = 1): SystemCo
   };
 }
 
+/** Fresh reader over the shared geometry. */
+function reader(): WorldReader {
+  return new WorldReader(geometry);
+}
+
 /** First land territory, so tests never accidentally operate on ocean. */
 function firstLand(reader: WorldReader): number {
   for (let id = 0; id < reader.territoryCount; id++) {
@@ -600,5 +605,107 @@ describe('VictorySystem', () => {
     system.update(makeContext(bus));
 
     expect(declared).toBe(dominator.slot);
+  });
+});
+
+describe('anti-snowball balance', () => {
+  it('caps an empire’s army sublinearly in territory count', () => {
+    // The single most important balance property: doubling territory must NOT
+    // double the army ceiling, or conquest compounds without limit and the
+    // match is decided minutes after first contact.
+    const measure = (territoryCount: number): number => {
+      const world = new WorldState(geometry);
+      const system = new PopulationSystem(world, reader());
+      const bus = new EventBus();
+
+      let granted = 0;
+      for (let id = 0; id < world.territoryCount && granted < territoryCount; id++) {
+        if (!reader().isLand(id)) continue;
+        world.setOwner(id, 0);
+        world.setPopulation(id, 100_000);
+        granted++;
+      }
+
+      // Run long enough to saturate against the cap.
+      for (let i = 0; i < 600; i++) system.update(makeContext(bus), 1000);
+      return world.totalsForSlot(0).troops;
+    };
+
+    const small = measure(10);
+    const large = measure(40);
+
+    // 4x the land must yield clearly less than 4x the army.
+    expect(large).toBeGreaterThan(small);
+    expect(large / small).toBeLessThan(3);
+    // ...but conquest must still be worth something.
+    expect(large / small).toBeGreaterThan(1.3);
+  });
+});
+
+describe('border width', () => {
+  it('resolves an encirclement faster than a single-front assault', () => {
+    // Makes the *shape* of a border matter: without this, adjacency is a
+    // boolean and a chokepoint defends no better than open ground.
+    const attackFrom = (surround: boolean): number => {
+      const world = new WorldState(geometry);
+      const bus = new EventBus();
+      const players = new PlayerRegistry(8);
+      const combat = new CombatSystem(world, reader(), players);
+      combat.init(makeContext(bus));
+
+      const attacker = players.add('a', 'A', false, 0)!;
+      const defender = players.add('b', 'B', false, 0)!;
+
+      // Choose a target with several land neighbours.
+      let target = -1;
+      for (let id = 0; id < world.territoryCount; id++) {
+        if (!reader().isLand(id)) continue;
+        let landNeighbours = 0;
+        const degree = reader().getNeighbourCount(id);
+        for (let k = 0; k < degree; k++) {
+          if (reader().isLand(reader().getNeighbourAt(id, k))) landNeighbours++;
+        }
+        if (landNeighbours >= 4) {
+          target = id;
+          break;
+        }
+      }
+      expect(target).toBeGreaterThanOrEqual(0);
+
+      const degree = reader().getNeighbourCount(target);
+      const neighbours: number[] = [];
+      for (let k = 0; k < degree; k++) {
+        const n = reader().getNeighbourAt(target, k);
+        if (reader().isLand(n)) neighbours.push(n);
+      }
+
+      // Either hold one bordering territory, or all of them.
+      const held = surround ? neighbours : [neighbours[0] as number];
+      for (const id of held) world.setOwner(id, attacker.slot);
+
+      world.setOwner(target, defender.slot);
+      world.setTroops(target, 2000);
+
+      bus.emit('combat:attack-launched', {
+        from: held[0] as number,
+        to: target,
+        attackerSlot: attacker.slot,
+        troops: 1500,
+        arrivesAt: 0,
+      });
+      bus.flush();
+
+      for (let i = 0; i < 20; i++) {
+        combat.update(makeContext(bus, i * 100, i), 100);
+        bus.flush();
+      }
+      return world.troops[target] as number;
+    };
+
+    const narrow = attackFrom(false);
+    const wide = attackFrom(true);
+
+    // Surrounding the target must grind its garrison down faster.
+    expect(wide).toBeLessThan(narrow);
   });
 });

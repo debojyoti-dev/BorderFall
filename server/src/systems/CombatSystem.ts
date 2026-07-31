@@ -124,6 +124,21 @@ export class CombatSystem extends BaseSystem {
     }
   }
 
+  /**
+   * How many of a territory's neighbours the attacker already holds.
+   *
+   * An O(degree) scan of the CSR neighbour list — typically six to ten
+   * contiguous `Uint16` reads, cheap enough to run per combat tick per army.
+   */
+  private sharedBorderWidth(slot: number, territory: number): number {
+    let shared = 0;
+    const degree = this.reader.getNeighbourCount(territory);
+    for (let k = 0; k < degree; k++) {
+      if (this.state.getOwner(this.reader.getNeighbourAt(territory, k)) === slot) shared++;
+    }
+    return shared;
+  }
+
   /** True when the territory belongs to the attacker or one of their allies. */
   private isFriendly(slot: number, territory: number): boolean {
     const owner = this.state.getOwner(territory);
@@ -176,10 +191,33 @@ export class CombatSystem extends BaseSystem {
       else defenderBonus = COMBAT.criticalMultiplier;
     }
 
+    /**
+     * Wide fronts resolve faster than narrow ones.
+     *
+     * Without this, adjacency is a boolean and every border is tactically
+     * identical — a chokepoint defends no better than open ground. Scaling the
+     * attacker's output by how much of the target's perimeter they already hold
+     * is what makes border *shape* a strategic object: chokepoints genuinely
+     * hold, salients are genuinely dangerous, and encirclement pays.
+     *
+     * Only the attacker's rate is scaled. The defender is fighting on all
+     * fronts at once regardless of how many of them there are.
+     */
+    const frontage = this.sharedBorderWidth(army.owner, target);
+    const widthMultiplier = Math.min(
+      COMBAT.maxBorderWidthMultiplier,
+      1 + Math.max(0, frontage - 1) * COMBAT.borderWidthBonus,
+    );
+
     // Lanchester: each side's losses are proportional to the opposing force.
     const attackerLosses = defence * COMBAT.attackerAttritionCoefficient * defenderBonus * seconds;
     const defenderLosses =
-      attack * COMBAT.defenderAttritionCoefficient * variance * attackerBonus * seconds;
+      attack *
+      COMBAT.defenderAttritionCoefficient *
+      variance *
+      attackerBonus *
+      widthMultiplier *
+      seconds;
 
     army.troops -= attackerLosses;
     const remainingDefenders = defendingTroops - defenderLosses;

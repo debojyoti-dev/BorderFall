@@ -99,6 +99,28 @@ export const POPULATION = {
   mobilisationRate: 0.05,
   /** Troops cost this much food per unit per economy tick. */
   troopFoodUpkeep: 0.002,
+
+  /**
+   * Empire-wide army ceiling: `base · territories^exponent + cities · bonus`.
+   *
+   * The **exponent below 1** is the anti-snowball lever, and it is the single
+   * most important number in the balance table. With a linear cap, conquest
+   * compounds without limit: more land means proportionally more army means
+   * more land, and the match is decided within minutes of first contact.
+   *
+   * At 0.6, doubling your territory raises your army ceiling by only ~1.5×.
+   * Conquest still pays, but with diminishing military returns, so a smaller
+   * player is never mathematically hopeless and wide empires must invest in
+   * cities rather than merely holding more dirt.
+   *
+   * This complements the per-territory logistic curve, which limits how fast a
+   * *single* territory fills. Without a global cap the per-territory limit is
+   * still linear in territory count in aggregate.
+   */
+  empireTroopBase: 900,
+  empireTroopExponent: 0.6,
+  /** Flat addition to the empire cap per city level. */
+  empireTroopPerCityLevel: 3000,
 } as const;
 
 /* -------------------------------------------------------------------------- */
@@ -153,6 +175,22 @@ export const COMBAT = {
   traversalMsPerCostUnit: 900,
   /** Cooldown before the same territory may launch another attack. */
   attackCooldownMs: 500,
+
+  /**
+   * How much a wide front accelerates an assault.
+   *
+   * Advance rate is multiplied by `1 + (sharedBorders - 1) · this`. Attacking a
+   * territory you surround on four sides resolves far faster than poking it
+   * through a single chokepoint.
+   *
+   * This is what makes the *shape* of a border a strategic object rather than
+   * scenery: chokepoints genuinely hold, salients are genuinely dangerous, and
+   * encirclement pays off. Without it, territory adjacency is a boolean and
+   * every border is tactically identical.
+   */
+  borderWidthBonus: 0.35,
+  /** Ceiling on the border-width multiplier, so encirclement is not instant. */
+  maxBorderWidthMultiplier: 2.5,
 } as const;
 
 /* -------------------------------------------------------------------------- */

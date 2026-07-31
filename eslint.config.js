@@ -6,6 +6,8 @@ import prettier from 'eslint-config-prettier';
 export default tseslint.config(
   {
     ignores: [
+      // AGPL-3.0 reference clone, studied but never built or shipped.
+      'reference/**',
       '**/dist/**',
       // Declaration/JS output from the client's project-reference build.
       '**/dist-types/**',

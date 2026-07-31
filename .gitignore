@@ -28,3 +28,7 @@ Thumbs.db
 
 data/mongo/
 data/redis/
+
+# Reference clones for study only. Never commit — OpenFrontIO is AGPL-3.0
+# and vendoring it would impose that licence on this project.
+reference/
