@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { env } from './config/env.js';
 import { createApp } from './network/http/createApp.js';
+import { LockstepRouter } from './network/LockstepRouter.js';
 import { MatchRouter } from './network/MatchRouter.js';
 import { SocketGateway } from './network/SocketGateway.js';
 import { MatchManager } from './match/MatchManager.js';
@@ -43,6 +44,16 @@ const gateway = new SocketGateway(httpServer);
 const router = new MatchRouter(matches);
 router.attach(gateway);
 
+/**
+ * The lockstep relay, mounted on its own Socket.IO path.
+ *
+ * Runs alongside the server-authoritative gateway during the transition to
+ * the tile model. Unlike the gateway it holds no world state at all — it
+ * stamps intents with the sender's slot and broadcasts turn bundles,
+ * and every client derives the world itself.
+ */
+const lockstep = new LockstepRouter(httpServer);
+
 httpServer.listen(env.port, env.host, () => {
   log.info('BorderFall server listening', {
     host: env.host,
@@ -83,6 +94,7 @@ async function shutdown(signal: string): Promise<void> {
     // timer fires against a half-closed server during the drain.
     router.dispose();
     matches.disposeAll();
+    await lockstep.close();
 
     await gateway.close();
     await new Promise<void>((resolve, reject) => {
